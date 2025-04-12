@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram TTS Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=eguonin
+Group=users
+WorkingDirectory=/home/eguonin/TelegramBots/tts-bot
+Environment=PATH=/home/eguonin/TelegramBots/tts-bot/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/eguonin/TelegramBots/tts-bot/venv/bin/python tts_bot.py
+StandardOutput=append:/home/eguonin/TelegramBots/tts-bot/bot.log
+StandardError=append:/home/eguonin/TelegramBots/tts-bot/bot.log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 
