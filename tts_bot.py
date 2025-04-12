@@ -14,6 +14,8 @@ import wave
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
+import google.generativeai as genai
+from PIL import Image
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +40,17 @@ AZURE_SPEECH_KEY = os.getenv('AZURE_SPEECH_KEY')
 AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION')
 AZURE_SPEECH_VOICE_NAME = os.getenv('AZURE_SPEECH_VOICE_NAME', 'en-US-JennyNeural')  # Default voice
 AZURE_SPEECH_URL = os.getenv('AZURE_SPEECH_URL')  # Custom endpoint URL
+
+# Gemini AI Settings
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-pro-vision')
+
+# Configure Gemini API
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    logger.info("Gemini API configured successfully")
+else:
+    logger.warning("Gemini API key not found. Image-to-text functionality will not work.")
 
 # API URLs
 ELEVEN_LABS_TTS_URL = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}/stream"
@@ -118,7 +131,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     await update.message.reply_text(
         "👋 Welcome to the TTS Bot!\n\n"
-        "Send me text, a PDF, TXT, or EPUB file, and I'll convert it to speech.\n\n"
+        "Send me text, a PDF, TXT, EPUB file, or an image, and I'll convert it to speech.\n\n"
         "Use /help to see available commands.\n"
         "Use /settings to configure the bot."
     )
@@ -134,7 +147,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "- Text message to convert to speech\n"
         "- PDF file to extract text and convert\n"
         "- TXT file to convert to speech\n"
-        "- EPUB file to extract text and convert\n\n"
+        "- EPUB file to extract text and convert\n"
+        "- Image to extract text using AI and convert\n\n"
         "Commands:\n"
         "/start - Start the bot\n"
         "/help - Show this help message\n"
@@ -1183,6 +1197,76 @@ async def process_text_chunk(query, context, title, text, tts_service, file_name
         await query.edit_message_text(f"❌ Error converting text to speech: {str(e)}")
         return False
 
+def extract_text_from_image(image_bytes):
+    """Extract text from an image using Gemini AI"""
+    if not GEMINI_API_KEY:
+        return None, "Gemini API key not configured. Cannot process images."
+    
+    try:
+        # Load the image
+        img = Image.open(BytesIO(image_bytes))
+        
+        # Create Gemini model instance
+        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        
+        # Prompt for text extraction
+        prompt = "Please extract all text from this image. Return only the extracted text without any additional comments."
+        
+        # Generate content
+        response = model.generate_content([prompt, img])
+        
+        # Get the extracted text
+        extracted_text = response.text
+        
+        logger.info(f"Successfully extracted text from image ({len(extracted_text)} characters)")
+        return extracted_text, None
+    
+    except Exception as e:
+        error_msg = f"Error extracting text from image: {str(e)}"
+        logger.error(error_msg)
+        return None, error_msg
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle photo/image messages."""
+    # Ensure user settings are loaded
+    ensure_user_settings(context, update.effective_user.id)
+    
+    # Get the largest photo
+    photo = update.message.photo[-1]
+    
+    await update.message.reply_text("🖼️ Processing image...")
+    
+    # Download photo
+    file = await context.bot.get_file(photo.file_id)
+    photo_bytes = BytesIO()
+    await file.download_to_memory(photo_bytes)
+    photo_bytes.seek(0)
+    
+    # Extract text from image
+    extracted_text, error = extract_text_from_image(photo_bytes.getvalue())
+    
+    if error:
+        await update.message.reply_text(f"❌ {error}")
+        return
+    
+    if not extracted_text or extracted_text.strip() == "":
+        await update.message.reply_text("❓ No text could be extracted from this image.")
+        return
+    
+    # Send the extracted text as a message
+    await update.message.reply_text(f"📝 Extracted text:\n\n{extracted_text}")
+    
+    # Check if text is too long
+    if len(extracted_text) > MAX_TEXT_LENGTH:
+        await update.message.reply_text(
+            f"⚠️ Extracted text is too long ({len(extracted_text)} characters). "
+            f"Maximum length is {MAX_TEXT_LENGTH} characters."
+        )
+        return
+    
+    # Process the extracted text with TTS
+    await process_text_to_speech(update, context, extracted_text, "image_text")
+
 def main() -> None:
     """Start the bot."""
     # Check Azure dependencies
@@ -1224,6 +1308,7 @@ def main() -> None:
     # Add message handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(MessageHandler(filters.Document.PDF | filters.Document.TXT | filters.Document.MimeType("application/epub+zip"), handle_document))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling()
