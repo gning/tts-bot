@@ -27,4 +27,7 @@ ENV/
 
 # Temporary files
 temp/
-tmp/ 
+tmp/
+
+# User data
+user_settings.json
