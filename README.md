@@ -1,12 +1,14 @@
 # Telegram TTS Bot
 
-A Telegram bot that converts text to speech using either Eleven Labs API or Azure Speech Service. The bot can process plain text messages, PDF files, and TXT files.
+A Telegram bot that converts text to speech using either Eleven Labs API or Azure Speech Service. The bot can process plain text messages, PDF files, TXT files, EPUB files, and images.
 
 ## Features
 
 - Convert text messages to speech
 - Extract text from PDF files and convert to speech
 - Process TXT files and convert to speech
+- Extract text from EPUB files and convert to speech by chapter
+- Extract text from images using Google's Gemini multimodal LLM
 - Multiple TTS service options (Eleven Labs and Azure)
 - Voice selection from available voices for each service
 - Comprehensive settings menu with service and voice selection
@@ -18,6 +20,7 @@ A Telegram bot that converts text to speech using either Eleven Labs API or Azur
 - Telegram Bot Token (from [BotFather](https://t.me/botfather))
 - Eleven Labs API Key (from [Eleven Labs](https://elevenlabs.io))
 - (Optional) Azure Speech Service Key (from [Azure Portal](https://portal.azure.com))
+- (Optional) Google Gemini API Key (from [Google AI Studio](https://ai.google.dev/))
 
 ### Azure TTS Dependencies
 If you plan to use Azure TTS, you may need to install additional system dependencies:
@@ -60,7 +63,7 @@ Windows typically has all required dependencies pre-installed.
    cp .env.example .env
    ```
 
-5. Edit the `.env` file with your Telegram Bot Token, Eleven Labs API Key, and optionally Azure Speech Service credentials
+5. Edit the `.env` file with your Telegram Bot Token, Eleven Labs API Key, and optionally Azure Speech Service and Google Gemini API credentials
    ```
    nano .env  # Or use any text editor
    ```
@@ -88,6 +91,14 @@ Available Eleven Labs models include:
 - `AZURE_SPEECH_REGION`: Azure region for your Speech Service (e.g., eastus, westeurope)
 - `AZURE_SPEECH_VOICE_NAME`: Default Azure voice name (e.g., en-US-JennyNeural)
 
+### Gemini AI Settings
+- `GEMINI_API_KEY`: Your Google AI (Gemini) API key
+- `GEMINI_MODEL_NAME`: (Optional) Gemini model to use for image-to-text conversion (default: gemini-pro-vision)
+
+Available Gemini models include:
+- `gemini-pro-vision`: Standard vision model
+- `gemini-2.5-pro-preview-03-25`: Latest preview model with improved capabilities
+
 ## Usage
 
 1. Start the bot
@@ -97,7 +108,7 @@ Available Eleven Labs models include:
 
 2. Open Telegram and start a conversation with your bot
 
-3. Send a text message, PDF, or TXT file to convert to speech
+3. Send a text message, PDF, TXT, EPUB file, or an image to convert to speech
 
 4. Use `/settings` command to configure TTS service and voice preferences
 
@@ -114,6 +125,7 @@ Available Eleven Labs models include:
 - Free tier of Eleven Labs limits text length to 2,500 characters
 - PDF extraction might not work perfectly for all PDF layouts
 - Azure Speech Service requires system dependencies for proper operation
+- Image text extraction quality depends on the clarity of the image and the text formatting
 
 ## Troubleshooting
 
