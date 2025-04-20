@@ -69,7 +69,8 @@ SETTINGS_FILE = "user_settings.json"
 DEFAULT_SETTINGS = {
     'tts_service': TTS_SERVICE_ELEVENLABS,
     'voice_id': ELEVEN_LABS_VOICE_ID,
-    'azure_voice_name': AZURE_SPEECH_VOICE_NAME
+    'azure_voice_name': AZURE_SPEECH_VOICE_NAME,
+    'epub_mode': 'manual'  # 'manual' or 'auto'
 }
 
 def load_user_settings():
@@ -165,6 +166,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     keyboard = [
         [InlineKeyboardButton("🔊 TTS Service", callback_data="settings_tts_service")],
         [InlineKeyboardButton("🎙 Voice Selection", callback_data="settings_voice")],
+        [InlineKeyboardButton("📖 EPUB Processing", callback_data="settings_epub_mode")],
         [InlineKeyboardButton("ℹ️ Current Settings", callback_data="settings_info")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -236,7 +238,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     settings_updated = False
     
     # EPUB chapter selection handler
-    if data.startswith("epub_"):
+    if data.startswith("epub_ch_"):
         # Get the full chapter key by removing only the "epub_" prefix
         chapter_key = data[5:]  # Remove "epub_" prefix
         logger.info(f"Selected chapter key: {chapter_key}")
@@ -375,6 +377,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(f"Select {tts_service.title()} Voice:", reply_markup=reply_markup)
     
+    elif data == "settings_epub_mode":
+        # Show EPUB processing mode selection
+        keyboard = [
+            [
+                InlineKeyboardButton("Manual (Select chapters)", callback_data="epub_mode_manual"),
+                InlineKeyboardButton("Auto (Process all)", callback_data="epub_mode_auto"),
+            ],
+            [InlineKeyboardButton("« Back to Settings", callback_data="back_to_settings")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Select EPUB Processing Mode:", reply_markup=reply_markup)
+    
     elif data == "settings_info":
         # Show current settings
         tts_service = context.user_data.get('tts_service', TTS_SERVICE_ELEVENLABS)
@@ -400,10 +414,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             }
             voice_name = friendly_names.get(voice_name_full, voice_name_full)
         
+        epub_mode = context.user_data.get('epub_mode', 'manual')
+        epub_mode_name = "Manual (Select chapters)" if epub_mode == 'manual' else "Auto (Process all)"
+        
         settings_info = (
             f"⚙️ Current Settings:\n\n"
             f"TTS Service: {service_name}\n"
             f"Voice: {voice_name}\n"
+            f"EPUB Mode: {epub_mode_name}\n"
         )
         
         keyboard = [[InlineKeyboardButton("« Back to Settings", callback_data="back_to_settings")]]
@@ -416,6 +434,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         keyboard = [
             [InlineKeyboardButton("🔊 TTS Service", callback_data="settings_tts_service")],
             [InlineKeyboardButton("🎙 Voice Selection", callback_data="settings_voice")],
+            [InlineKeyboardButton("📖 EPUB Processing", callback_data="settings_epub_mode")],
             [InlineKeyboardButton("ℹ️ Current Settings", callback_data="settings_info")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -485,6 +504,23 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(f"Azure voice set to: {friendly_name}", reply_markup=reply_markup)
+
+    # EPUB mode selection handlers
+    elif data.startswith("epub_mode_"):
+        mode = data.split("_")[2]  # Get 'manual' or 'auto'
+        context.user_data['epub_mode'] = mode
+        
+        # Save the updated settings
+        if 'user_settings' in context.bot_data:
+            context.bot_data['user_settings'][user_id] = context.user_data.copy()
+            save_user_settings(context.bot_data['user_settings'])
+        
+        # After setting the EPUB mode, show the back button
+        keyboard = [[InlineKeyboardButton("« Back to Settings", callback_data="back_to_settings")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        mode_display = "Manual (Select chapters)" if mode == 'manual' else "Auto (Process all)"
+        await query.edit_message_text(f"EPUB Processing Mode set to: {mode_display}", reply_markup=reply_markup)
 
 def extract_text_from_pdf(pdf_file):
     """Extract text from a PDF file"""
@@ -877,36 +913,44 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             first_chapter = next(iter(chapters.values()))
             context.user_data['current_book_title'] = first_chapter.get('book_title', '')
             
-            # Create chapter selection keyboard
-            keyboard = []
-            row = []
+            # Check user's EPUB processing mode
+            epub_mode = context.user_data.get('epub_mode', 'manual')
             
-            for i, (chapter_key, chapter_info) in enumerate(chapters.items()):
-                # Create a new row every 2 buttons
-                if i % 2 == 0 and i > 0:
+            if epub_mode == 'auto':
+                # Auto process all chapters
+                await process_all_chapters(update, context, chapters)
+            else:
+                # Manual mode - create chapter selection keyboard
+                keyboard = []
+                row = []
+                
+                for i, (chapter_key, chapter_info) in enumerate(chapters.items()):
+                    # Create a new row every 2 buttons
+                    if i % 2 == 0 and i > 0:
+                        keyboard.append(row)
+                        row = []
+                    
+                    # Use only the chapter title (not the full title with book name)
+                    title = chapter_info["title"]
+                    if len(title) > 30:
+                        title = title[:27] + "..."
+                    
+                    # Use "epub_ch_" prefix to distinguish from epub mode settings
+                    row.append(InlineKeyboardButton(title, callback_data=f"epub_ch_{chapter_key}"))
+                
+                # Add the last row if not empty
+                if row:
                     keyboard.append(row)
-                    row = []
+                    
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 
-                # Use only the chapter title (not the full title with book name)
-                title = chapter_info["title"]
-                if len(title) > 30:
-                    title = title[:27] + "..."
-                
-                row.append(InlineKeyboardButton(title, callback_data=f"epub_{chapter_key}"))
-            
-            # Add the last row if not empty
-            if row:
-                keyboard.append(row)
-                
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            # Send chapter selection message with book title
-            book_title = context.user_data['current_book_title']
-            await update.message.reply_text(
-                f"📖 EPUB: \"{book_title}\" loaded with {len(chapters)} chapters.\n"
-                f"Please select a chapter to convert to speech:",
-                reply_markup=reply_markup
-            )
+                # Send chapter selection message with book title
+                book_title = context.user_data['current_book_title']
+                await update.message.reply_text(
+                    f"📖 EPUB: \"{book_title}\" loaded with {len(chapters)} chapters.\n"
+                    f"Please select a chapter to convert to speech:",
+                    reply_markup=reply_markup
+                )
             
         except Exception as e:
             logger.error(f"Error extracting text from EPUB: {e}")
@@ -1266,6 +1310,175 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # Process the extracted text with TTS
     await process_text_to_speech(update, context, extracted_text, "image_text")
+
+async def process_all_chapters(update: Update, context: ContextTypes.DEFAULT_TYPE, chapters):
+    """Process all chapters in an EPUB file automatically."""
+    book_title = context.user_data.get('current_book_title', '')
+    total_chapters = len(chapters)
+    
+    await update.message.reply_text(
+        f"📚 Auto-processing all {total_chapters} chapters from \"{book_title}\"...\n"
+        f"This may take some time. You'll receive each chapter as it's processed."
+    )
+    
+    # Get selected TTS service
+    tts_service = context.user_data.get('tts_service', TTS_SERVICE_ELEVENLABS)
+    service_name = "Eleven Labs" if tts_service == TTS_SERVICE_ELEVENLABS else "Azure"
+    
+    # Process chapters one by one
+    success_count = 0
+    error_count = 0
+    
+    for i, (chapter_key, chapter_info) in enumerate(chapters.items(), 1):
+        chapter_title = chapter_info["title"]
+        chapter_text = chapter_info["text"]
+        
+        # Send progress message for each chapter
+        status_message = await update.message.reply_text(
+            f"🔊 Processing chapter {i}/{total_chapters}: \"{chapter_title}\""
+        )
+        
+        # Check if chapter is too long
+        if len(chapter_text) > MAX_TEXT_LENGTH:
+            await status_message.edit_text(
+                f"⚠️ Chapter {i}/{total_chapters} \"{chapter_title}\" is too long ({len(chapter_text)} characters). "
+                f"Maximum length is {MAX_TEXT_LENGTH} characters. Skipping."
+            )
+            error_count += 1
+            continue
+        
+        # Create sanitized file name for the chapter
+        sanitized_chapter_title = ''.join(c for c in chapter_title if c.isalnum() or c in ' _-.')
+        sanitized_book_title = ''.join(c for c in book_title if c.isalnum() or c in ' _-.')
+        
+        # Get original file name base if available
+        original_base_name = context.user_data.get('current_base_name', '')
+        
+        # Decide which name to use for the base (prioritize book title)
+        if sanitized_book_title:
+            base_file_name = f"{sanitized_book_title} - {sanitized_chapter_title}"
+        elif original_base_name:
+            base_file_name = f"{original_base_name} - {sanitized_chapter_title}"
+        else:
+            base_file_name = sanitized_chapter_title
+        
+        if len(base_file_name) > 36:
+            base_file_name = base_file_name[:35] + "..."
+        
+        # Split text into manageable chunks if necessary
+        max_chunk_size = 4000
+        text_chunks = split_text_into_chunks(chapter_text, max_chunk_size)
+        total_chunks = len(text_chunks)
+        
+        # Update status message
+        if total_chunks > 1:
+            await status_message.edit_text(
+                f"🔊 Chapter {i}/{total_chapters}: \"{chapter_title}\" will be processed in {total_chunks} parts."
+            )
+        
+        # Process each chunk
+        chunk_success = True
+        for j, chunk in enumerate(text_chunks, 1):
+            # Update status message for chunks
+            if total_chunks > 1:
+                await status_message.edit_text(
+                    f"🔊 Chapter {i}/{total_chapters}: \"{chapter_title}\" - Processing part {j}/{total_chunks}"
+                )
+            
+            # Create part-specific file name if needed
+            if total_chunks > 1:
+                part_file_name = f"{base_file_name}-{j}"
+            else:
+                part_file_name = base_file_name
+            
+            # Process the text chunk
+            try:
+                # Use the selected service to generate audio
+                audio_content = None
+                error_message = None
+                
+                if tts_service == TTS_SERVICE_ELEVENLABS:
+                    voice_id = context.user_data.get('voice_id', ELEVEN_LABS_VOICE_ID)
+                    audio_content = elevenlabs_text_to_speech(chunk, voice_id)
+                else:  # Azure
+                    voice_name = context.user_data.get('azure_voice_name', AZURE_SPEECH_VOICE_NAME)
+                    audio_content, error_message = azure_text_to_speech(chunk, voice_name)
+                
+                if not audio_content:
+                    error_msg = error_message or "Failed to convert text to speech"
+                    await status_message.edit_text(
+                        f"❌ Error processing chapter {i}/{total_chapters} \"{chapter_title}\": {error_msg}"
+                    )
+                    chunk_success = False
+                    break
+                
+                # Create temporary file for audio
+                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_audio:
+                    temp_audio.write(audio_content)
+                    temp_audio_path = temp_audio.name
+                
+                # Send the audio
+                try:
+                    with open(temp_audio_path, 'rb') as audio:
+                        if total_chunks > 1:
+                            caption = f"{chapter_title} (Part {j}/{total_chunks})"
+                        else:
+                            caption = chapter_title
+                        
+                        # Try to send as voice message first
+                        try:
+                            await update.message.reply_voice(audio, caption=caption)
+                        except Exception as voice_error:
+                            # If voice messages are forbidden, send as audio file
+                            if "Voice_messages_forbidden" in str(voice_error):
+                                logger.info("Voice messages forbidden, sending as audio file instead")
+                                with open(temp_audio_path, 'rb') as audio_file:
+                                    await update.message.reply_audio(
+                                        audio_file, 
+                                        filename=f"{part_file_name}.mp3"
+                                    )
+                            else:
+                                raise
+                except Exception as e:
+                    logger.error(f"Error sending audio for chapter {i}/{total_chapters}: {e}")
+                    await status_message.edit_text(
+                        f"❌ Error sending audio for chapter {i}/{total_chapters} \"{chapter_title}\": {str(e)}"
+                    )
+                    chunk_success = False
+                    break
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(temp_audio_path):
+                        os.unlink(temp_audio_path)
+                
+            except Exception as e:
+                logger.error(f"Error processing chunk for chapter {i}/{total_chapters}: {e}")
+                await status_message.edit_text(
+                    f"❌ Error processing chapter {i}/{total_chapters} \"{chapter_title}\": {str(e)}"
+                )
+                chunk_success = False
+                break
+        
+        # Update chapter status based on success
+        if chunk_success:
+            success_count += 1
+            if total_chunks > 1:
+                await status_message.edit_text(
+                    f"✅ Chapter {i}/{total_chapters}: \"{chapter_title}\" processed in {total_chunks} parts."
+                )
+            else:
+                await status_message.edit_text(
+                    f"✅ Chapter {i}/{total_chapters}: \"{chapter_title}\" processed successfully."
+                )
+        else:
+            error_count += 1
+    
+    # Final summary message
+    await update.message.reply_text(
+        f"📚 EPUB processing complete.\n"
+        f"✅ Successfully processed: {success_count}/{total_chapters} chapters\n"
+        f"❌ Failed: {error_count}/{total_chapters} chapters"
+    )
 
 def main() -> None:
     """Start the bot."""
