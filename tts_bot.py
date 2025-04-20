@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # Environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
+# Local Telegram API Server Settings
+USE_LOCAL_API = os.getenv('USE_LOCAL_API', 'false').lower() == 'true'
+LOCAL_API_URL = os.getenv('LOCAL_API_URL')
+
 # Eleven Labs Settings
 ELEVEN_LABS_API_KEY = os.getenv('ELEVEN_LABS_API_KEY')
 ELEVEN_LABS_VOICE_ID = os.getenv('ELEVEN_LABS_VOICE_ID', 'EXAVITQu4vr4xnSDxMaL')  # Default voice
@@ -850,114 +854,142 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ensure_user_settings(context, update.effective_user.id)
     
     # Get file info and download
-    file = await context.bot.get_file(update.message.document.file_id)
-    file_bytes = BytesIO()
-    await file.download_to_memory(file_bytes)
-    file_bytes.seek(0)
-    
-    # Store original filename in user data for reference
-    file_name = update.message.document.file_name
-    context.user_data['current_file_name'] = file_name
-    base_name = os.path.splitext(file_name)[0]
-    context.user_data['current_base_name'] = base_name
-    
-    # Check document type
-    if file_name.lower().endswith('.pdf'):
-        await update.message.reply_text("📄 Processing PDF file...")
-        try:
-            text = extract_text_from_pdf(file_bytes)
-        except Exception as e:
-            logger.error(f"Error extracting text from PDF: {e}")
-            await update.message.reply_text("❌ Error processing PDF file.")
-            return
-            
-        if len(text) > MAX_TEXT_LENGTH:
-            await update.message.reply_text(
-                f"⚠️ Extracted text is too long ({len(text)} characters). "
-                f"Maximum length is {MAX_TEXT_LENGTH} characters."
-            )
-            return
-            
-        await process_text_to_speech(update, context, text, base_name)
+    try:
+        file = await context.bot.get_file(update.message.document.file_id)
+        file_bytes = BytesIO()
+        await file.download_to_memory(file_bytes)
+        file_bytes.seek(0)
         
-    elif file_name.lower().endswith('.txt'):
-        await update.message.reply_text("📝 Processing TXT file...")
-        try:
-            text = extract_text_from_txt(file_bytes)
-        except Exception as e:
-            logger.error(f"Error extracting text from TXT: {e}")
-            await update.message.reply_text("❌ Error processing TXT file.")
-            return
-            
-        if len(text) > MAX_TEXT_LENGTH:
-            await update.message.reply_text(
-                f"⚠️ Extracted text is too long ({len(text)} characters). "
-                f"Maximum length is {MAX_TEXT_LENGTH} characters."
-            )
-            return
-            
-        await process_text_to_speech(update, context, text, base_name)
+        # Store original filename in user data for reference
+        file_name = update.message.document.file_name
+        context.user_data['current_file_name'] = file_name
+        base_name = os.path.splitext(file_name)[0]
+        context.user_data['current_base_name'] = base_name
         
-    elif file_name.lower().endswith('.epub'):
-        await update.message.reply_text("📚 Processing EPUB file...")
-        try:
-            chapters = extract_text_from_epub(file_bytes)
-            
-            if not chapters:
-                await update.message.reply_text("❌ No readable content found in EPUB file.")
+        # Check document type
+        if file_name.lower().endswith('.pdf'):
+            await update.message.reply_text("📄 Processing PDF file...")
+            try:
+                text = extract_text_from_pdf(file_bytes)
+            except Exception as e:
+                logger.error(f"Error extracting text from PDF: {e}")
+                await update.message.reply_text("❌ Error processing PDF file.")
                 return
                 
-            # Store chapters in user data for later access
-            context.user_data['epub_chapters'] = chapters
-            # Also store book title for reference
-            first_chapter = next(iter(chapters.values()))
-            context.user_data['current_book_title'] = first_chapter.get('book_title', '')
-            
-            # Check user's EPUB processing mode
-            epub_mode = context.user_data.get('epub_mode', 'manual')
-            
-            if epub_mode == 'auto':
-                # Auto process all chapters
-                await process_all_chapters(update, context, chapters)
-            else:
-                # Manual mode - create chapter selection keyboard
-                keyboard = []
-                row = []
-                
-                for i, (chapter_key, chapter_info) in enumerate(chapters.items()):
-                    # Create a new row every 2 buttons
-                    if i % 2 == 0 and i > 0:
-                        keyboard.append(row)
-                        row = []
-                    
-                    # Use only the chapter title (not the full title with book name)
-                    title = chapter_info["title"]
-                    if len(title) > 30:
-                        title = title[:27] + "..."
-                    
-                    # Use "epub_ch_" prefix to distinguish from epub mode settings
-                    row.append(InlineKeyboardButton(title, callback_data=f"epub_ch_{chapter_key}"))
-                
-                # Add the last row if not empty
-                if row:
-                    keyboard.append(row)
-                    
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                # Send chapter selection message with book title
-                book_title = context.user_data['current_book_title']
+            if len(text) > MAX_TEXT_LENGTH:
                 await update.message.reply_text(
-                    f"📖 EPUB: \"{book_title}\" loaded with {len(chapters)} chapters.\n"
-                    f"Please select a chapter to convert to speech:",
-                    reply_markup=reply_markup
+                    f"⚠️ Extracted text is too long ({len(text)} characters). "
+                    f"Maximum length is {MAX_TEXT_LENGTH} characters."
                 )
+                return
+                
+            await process_text_to_speech(update, context, text, base_name)
             
-        except Exception as e:
-            logger.error(f"Error extracting text from EPUB: {e}")
-            await update.message.reply_text("❌ Error processing EPUB file.")
+        elif file_name.lower().endswith('.txt'):
+            await update.message.reply_text("📝 Processing TXT file...")
+            try:
+                text = extract_text_from_txt(file_bytes)
+            except Exception as e:
+                logger.error(f"Error extracting text from TXT: {e}")
+                await update.message.reply_text("❌ Error processing TXT file.")
+                return
+                
+            if len(text) > MAX_TEXT_LENGTH:
+                await update.message.reply_text(
+                    f"⚠️ Extracted text is too long ({len(text)} characters). "
+                    f"Maximum length is {MAX_TEXT_LENGTH} characters."
+                )
+                return
+                
+            await process_text_to_speech(update, context, text, base_name)
+            
+        elif file_name.lower().endswith('.epub'):
+            await update.message.reply_text("📚 Processing EPUB file...")
+            try:
+                chapters = extract_text_from_epub(file_bytes)
+                
+                if not chapters:
+                    await update.message.reply_text("❌ No readable content found in EPUB file.")
+                    return
+                    
+                # Store chapters in user data for later access
+                context.user_data['epub_chapters'] = chapters
+                # Also store book title for reference
+                first_chapter = next(iter(chapters.values()))
+                context.user_data['current_book_title'] = first_chapter.get('book_title', '')
+                
+                # Check user's EPUB processing mode
+                epub_mode = context.user_data.get('epub_mode', 'manual')
+                
+                if epub_mode == 'auto':
+                    # Auto process all chapters
+                    await process_all_chapters(update, context, chapters)
+                else:
+                    # Manual mode - create chapter selection keyboard
+                    keyboard = []
+                    row = []
+                    
+                    for i, (chapter_key, chapter_info) in enumerate(chapters.items()):
+                        # Create a new row every 2 buttons
+                        if i % 2 == 0 and i > 0:
+                            keyboard.append(row)
+                            row = []
+                        
+                        # Use only the chapter title (not the full title with book name)
+                        title = chapter_info["title"]
+                        if len(title) > 30:
+                            title = title[:27] + "..."
+                        
+                        # Use "epub_ch_" prefix to distinguish from epub mode settings
+                        row.append(InlineKeyboardButton(title, callback_data=f"epub_ch_{chapter_key}"))
+                    
+                    # Add the last row if not empty
+                    if row:
+                        keyboard.append(row)
+                        
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    # Send chapter selection message with book title
+                    book_title = context.user_data['current_book_title']
+                    await update.message.reply_text(
+                        f"📖 EPUB: \"{book_title}\" loaded with {len(chapters)} chapters.\n"
+                        f"Please select a chapter to convert to speech:",
+                        reply_markup=reply_markup
+                    )
+                
+            except Exception as e:
+                logger.error(f"Error extracting text from EPUB: {e}")
+                await update.message.reply_text("❌ Error processing EPUB file.")
+                return
+        else:
+            await update.message.reply_text("❌ Unsupported file type. Please send a PDF, TXT, or EPUB file.")
             return
-    else:
-        await update.message.reply_text("❌ Unsupported file type. Please send a PDF, TXT, or EPUB file.")
+    except Exception as e:
+        error_message = str(e)
+        logger.error(f"Error handling document: {error_message}")
+        
+        # Check for file size error, which can occur even when using local API server
+        # if the server itself isn't properly configured
+        if "File is too big" in error_message:
+            if USE_LOCAL_API:
+                await update.message.reply_text(
+                    "❌ File is too large. Your local Telegram API server needs additional configuration to handle large files.\n\n"
+                    "Please check the configuration of your local server and make sure:\n"
+                    "1. The server is started with the '--local' flag\n"
+                    "2. The server has proper file storage options set\n"
+                    "3. The local server is configured to handle files larger than 20MB\n\n"
+                    "Consult the Telegram Bot API documentation for details on configuring the local server."
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ File is too large. Telegram limits bot downloads to 20MB.\n\n"
+                    "To process larger files, you need to:\n"
+                    "1. Set up a local Telegram API server\n"
+                    "2. Configure the bot to use it by setting USE_LOCAL_API=true and LOCAL_API_URL in .env file\n"
+                    "3. Ensure your local API server is properly configured for large files"
+                )
+        else:
+            await update.message.reply_text(f"❌ Error processing file: {error_message}")
         return
 
 async def process_text_to_speech(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, file_name_base=None) -> None:
@@ -1209,25 +1241,11 @@ async def process_text_chunk(query, context, title, text, tts_service, file_name
                 # Use proper caption with title and output filename
                 await query.message.reply_voice(audio, caption=f"{output_file_name}")
         except Exception as voice_error:
-            # If voice messages are forbidden or too large, try audio file
-            if "Voice_messages_forbidden" in str(voice_error) or "Request Entity Too Large" in str(voice_error):
-                logger.info(f"Voice message failed: {str(voice_error)}, trying audio file")
-                
-                # If file is too large, also try to split into smaller chunks for next time
-                if "Request Entity Too Large" in str(voice_error):
-                    logger.warning(f"Audio file too large ({file_size / (1024*1024):.2f} MB). Consider using smaller chunks.")
-                
-                try:
-                    with open(temp_audio_path, 'rb') as audio:
-                        # For audio files, automatically add file extension
-                        filename = f"{output_file_name}.mp3"
-                        logger.info(f"Sending audio file: {filename}")
-                        await query.message.reply_audio(audio, filename=filename)
-                except Exception as audio_error:
-                    logger.error(f"Audio file send error: {str(audio_error)}")
-                    await query.edit_message_text(f"❌ Failed to send audio: {str(audio_error)}")
-                    os.unlink(temp_audio_path)
-                    return False
+            # If voice messages are forbidden, send as regular audio file
+            if "Voice_messages_forbidden" in str(voice_error):
+                logger.info("Voice messages forbidden, sending as audio file instead")
+                with open(temp_audio_path, 'rb') as audio:
+                    await query.message.reply_audio(audio, filename=f"{output_file_name}.mp3")
             else:
                 # Re-raise if it's a different error
                 raise
@@ -1501,8 +1519,18 @@ def main() -> None:
     else:
         logger.warning("Azure Speech Service is not configured properly. Eleven Labs will be used as fallback.")
     
-    # Create the Application and store persistence data in bot_data
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    # Create the Application with proper configuration
+    application_builder = Application.builder().token(TELEGRAM_TOKEN)
+    
+    # Configure local API server if enabled
+    if USE_LOCAL_API and LOCAL_API_URL:
+        logger.info(f"Using local Telegram API server at: {LOCAL_API_URL}")
+        application_builder.base_url(LOCAL_API_URL)
+    else:
+        logger.info("Using public Telegram API server")
+        
+    # Build the application
+    application = application_builder.build()
     
     # Initialize user settings
     application.bot_data['user_settings'] = load_user_settings()

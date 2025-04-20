@@ -74,6 +74,8 @@ The bot supports the following configuration options in the `.env` file:
 
 ### Telegram Settings
 - `TELEGRAM_TOKEN`: Your Telegram bot token from BotFather
+- `USE_LOCAL_API`: (Optional) Set to 'true' to use a local Telegram API server (default: 'false')
+- `LOCAL_API_URL`: (Optional) URL of the local Telegram API server (e.g. 'http://localhost:8081')
 
 ### Eleven Labs Settings
 - `ELEVEN_LABS_API_KEY`: Your Eleven Labs API key
@@ -98,6 +100,33 @@ Available Eleven Labs models include:
 Available Gemini models include:
 - `gemini-pro-vision`: Standard vision model
 - `gemini-2.5-pro-preview-03-25`: Latest preview model with improved capabilities
+
+## Local Telegram API Server
+
+By default, Telegram's Bot API limits file downloads to 20MB, which can be restrictive when working with larger audio files or PDFs. To bypass this limitation, you can configure the bot to use a local Telegram API server:
+
+1. Set `USE_LOCAL_API=true` in your `.env` file
+2. Specify the URL of your local API server with `LOCAL_API_URL=http://your-server-url`
+
+### Local API Server Configuration
+
+To properly handle files larger than 20MB, you need to configure your local Telegram API server correctly:
+
+1. Download the official [Telegram Bot API server](https://github.com/tdlib/telegram-bot-api)
+2. Run the server with the `--local` flag and appropriate storage options:
+
+```bash
+./telegram-bot-api --api-id=YOUR_API_ID --api-hash=YOUR_API_HASH --local
+```
+
+3. Make sure your local server is properly configured for file storage and has enough disk space
+4. You may need additional parameters depending on your setup:
+   - `--dir`: Directory for persistent data storage
+   - `--temp-dir`: Directory for storing temporary files
+
+The local API server will typically run on port 8081 by default, so your `LOCAL_API_URL` should be `http://localhost:8081` in most cases.
+
+For more information on running and configuring a local Telegram API server, refer to the [official Telegram documentation](https://core.telegram.org/bots/api#using-a-local-bot-api-server).
 
 ## Usage
 
@@ -137,6 +166,12 @@ If you encounter errors with Azure TTS:
 
 If Azure TTS fails, the bot will automatically fall back to using Eleven Labs.
 
+### File Size Errors
+If you're using a local Telegram API server but still encounter "File is too big" errors:
+1. Make sure the local API server is started with the `--local` flag
+2. Check that the server has sufficient storage space and permissions
+3. Use appropriate file storage parameters for your server setup
+
 ## License
 
-MIT 
+MIT
